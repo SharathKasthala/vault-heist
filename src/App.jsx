@@ -151,7 +151,7 @@ const App = () => {
           MINI GAME STORE <span>•</span> VAULT HEIST
         </p>
         <p className="footer-credit">
-          © {new Date().getFullYear()} Vault Heist. Built by Sharath Chandra.
+          © {new Date().getFullYear()} Vault Heist. Built with ❤️ by Sharath Chandra.
         </p>
       </footer>
     </main>

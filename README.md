@@ -75,3 +75,5 @@ src/
   assets/images/             Safe images
 public/                      Icons and logo
 ```
+## Credits
+Built with ❤️ by Sharath Chandra Kasthala.
