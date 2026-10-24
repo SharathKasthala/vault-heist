@@ -4,7 +4,7 @@
 
 A safe-cracking puzzle game built with React and Vite. Spin the dial, listen to the lock, and open all three locks before the clock runs out.
 
-**Play it:** _add your Vercel link here_
+**Play it:** (https://vault-heist-game.vercel.app/)
 
 ## How to play
 1. Pick a difficulty and tap **Unlock Safe**.
