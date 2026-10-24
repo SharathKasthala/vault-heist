@@ -76,7 +76,7 @@ const App = () => {
       {!showMechanism ? (
         <section className="safe-scene">
           <div className="scene-title">
-          {/* <img src='/logo.png' alt='' className='title-logo' /> */}
+            {/* <img src='/logo.png' alt='' className='title-logo' /> */}
             <h1>VAULT HEIST</h1>
             <p className="scene-subtitle">Something mysterious awaits...</p>
           </div>
@@ -147,7 +147,12 @@ const App = () => {
       )}
 
       <footer className="game-footer">
-        MINI GAME STORE <span>•</span> VAULT HEIST
+        <p className="footer-brand">
+          MINI GAME STORE <span>•</span> VAULT HEIST
+        </p>
+        <p className="footer-credit">
+          © {new Date().getFullYear()} Vault Heist. Built by Sharath Chandra.
+        </p>
       </footer>
     </main>
   );

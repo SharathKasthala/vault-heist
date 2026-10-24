@@ -473,6 +473,42 @@
 }
 
 /* Hide the big icon on short screens so the safe and picker still fit */
-@media (max-height: 680px) {
+@media (max-height: 760px) {
+  .title-logo { display: none; }
+}
+
+/* Footer: brand line + copyright line */
+.footer-brand {
+  margin: 0 0 4px;
+}
+
+.footer-credit {
+  margin: 0;
+  color: #9296a0;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.footer-credit,
+.footer-credit * {
+  text-transform: none;
+}
+
+/* Fit the home screen on laptop-height screens without scrolling */
+.safe-scene {
+  padding: 12px 16px;
+}
+
+.safe-container {
+  height: min(400px, 44vh);
+}
+
+.title-logo {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 8px;
+}
+
+@media (max-height: 820px) {
   .title-logo { display: none; }
 }
