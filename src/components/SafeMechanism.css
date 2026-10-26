@@ -847,14 +847,10 @@
 }
 
 /* The screen washes out to gold, and the win screen fades in from it. */
-.unlock-flash,
-.opened-screen::after {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  pointer-events: none;
-  background: radial-gradient(circle at 50% 45%, #fff8e1, #f3d47a 45%, #b88927 100%);
-}
+  .unlock-flash,
+  .opened-screen::after {
+    display: none;
+  }
 
 .unlock-flash {
   opacity: 0;

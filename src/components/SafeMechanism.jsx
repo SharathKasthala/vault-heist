@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import unlockedSafeImage from '../assets/images/unlocked-safe.webp';
+import applauseSoundUrl from '../assets/sounds/applause.mp3';
+import popSoundUrl from '../assets/sounds/confetti.mp3';
 import Confetti from './Confetti.jsx';
 import StarRating from './StarRating.jsx';
 import { formatTime, readStorage, writeStorage } from '../utils.js';
@@ -12,6 +14,28 @@ const IDLE_SOUND_MS = 5000; // beeping pauses after this long without turning
 const UNLOCK_SEQUENCE_MS = 1800; // length of the final unlock animation
 const STAR_START_MS = 1150; // when the first star pops on the win screen
 const STAR_STEP_MS = 250; // gap between stars
+
+// Win-screen sound timing (ms after the open safe appears).
+const POP_AT_MS = 300; // matches the confetti cannons
+const FANFARE_AT_MS = 450;
+const APPLAUSE_AT_MS = 650;
+
+// Applause grows with the star rating: volume (0-1) and how long it plays (s).
+const APPLAUSE_BY_STARS = {
+  1: { volume: 0.3, length: 2.2 },
+  2: { volume: 0.45, length: 3.2 },
+  3: { volume: 0.6, length: 4.1 },
+};
+
+const SOUND_FILES = {
+  applause: applauseSoundUrl,
+  pop: popSoundUrl,
+};
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+}
 const DEGREES_PER_NUMBER = 360 / TOTAL_NUMBERS;
 const DIAL_MARKS = Array.from({ length: TOTAL_NUMBERS }, (_, number) => number);
 
@@ -157,6 +181,9 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
   const keyHandlerRef = useRef(null);
   const housingRef = useRef(null);
   const dragRef = useRef(null);
+  const soundFiles = useRef({}); // name -> Promise of the raw file
+  const soundBuffers = useRef({}); // name -> decoded audio, ready to play
+  const celebrationSources = useRef(new Set());
 
   const isPlaying = !gameOver && !showOpenedSafe;
   const currentNumber = wrapNumber(rotation);
@@ -308,6 +335,79 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
     });
   }, [playSound]);
 
+  // Decodes a sound file once, then reuses it.
+  const loadSound = useCallback(async (name) => {
+    if (soundBuffers.current[name]) return soundBuffers.current[name];
+
+    const context = await getAudioContext();
+    const data = await soundFiles.current[name];
+    if (!context || !data) return null;
+
+    try {
+      const buffer = await context.decodeAudioData(data.slice(0));
+      soundBuffers.current[name] = buffer;
+      return buffer;
+    } catch (error) {
+      console.error(`Unable to decode ${name} sound:`, error);
+      return null;
+    }
+  }, [getAudioContext]);
+
+  // Plays a recorded clip. pan: -1 (left) to 1 (right).
+  // stopAfter: seconds to play before fading out, for shorter versions.
+  const playClip = useCallback(async (name, { volume = 1, pan = 0, stopAfter = null, fadeOut = 0.6 } = {}) => {
+    if (mutedRef.current) return;
+
+    const buffer = await loadSound(name);
+    const context = audioContext.current;
+    if (!buffer || !context || mutedRef.current) return;
+
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    const nodes = [gain];
+    const now = context.currentTime;
+
+    source.buffer = buffer;
+    gain.gain.setValueAtTime(volume, now);
+    source.connect(gain);
+
+    if (pan && context.createStereoPanner) {
+      const panner = context.createStereoPanner();
+      panner.pan.value = pan;
+      gain.connect(panner);
+      panner.connect(context.destination);
+      nodes.push(panner);
+    } else {
+      gain.connect(context.destination);
+    }
+
+    celebrationSources.current.add(source);
+    source.onended = () => {
+      celebrationSources.current.delete(source);
+      source.disconnect();
+      nodes.forEach((node) => node.disconnect());
+    };
+
+    source.start(now);
+
+    if (stopAfter !== null && stopAfter < buffer.duration) {
+      gain.gain.setValueAtTime(volume, now + Math.max(0, stopAfter - fadeOut));
+      gain.gain.linearRampToValueAtTime(0.0001, now + stopAfter);
+      source.stop(now + stopAfter + 0.05);
+    }
+  }, [loadSound]);
+
+  const stopCelebrationSounds = useCallback(() => {
+    celebrationSources.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+        // Already finished.
+      }
+    });
+    celebrationSources.current.clear();
+  }, []);
+
   /* ---------- Timer ---------- */
 
   const clearTransition = useCallback(() => {
@@ -369,6 +469,7 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
 
     if (nextMuted) {
       stopProximitySound();
+      stopCelebrationSounds();
       // Without sound the player needs another clue, so switch hints on.
       if (!hintsOn) {
         setHintsOn(true);
@@ -437,6 +538,10 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
     setFeedback('All locks released. Opening the vault...');
     playBoltSound();
     buzz(HAPTICS.unlock);
+
+    // Decode the win sounds now so they're ready when the vault opens.
+    loadSound('pop');
+    loadSound('applause');
 
     transitionTimer.current = setTimeout(() => {
       setIsUnlocking(false);
@@ -524,6 +629,7 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
 
   function restartGame() {
     stopProximitySound();
+    stopCelebrationSounds();
     clearTransition();
     stopTimer();
 
@@ -551,6 +657,7 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
 
   function handleBack() {
     stopProximitySound();
+    stopCelebrationSounds();
     onBack?.();
   }
 
@@ -663,18 +770,47 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
 
   /* ---------- Lifecycle ---------- */
 
-  // Preload the reward image so the win screen doesn't flash empty.
+  // Preload the reward image and win sounds so nothing lags at the end.
   useEffect(() => {
     const image = new Image();
     image.src = unlockedSafeImage;
+
+    Object.entries(SOUND_FILES).forEach(([name, url]) => {
+      soundFiles.current[name] = fetch(url)
+        .then((response) => (response.ok ? response.arrayBuffer() : null))
+        .catch(() => null);
+    });
   }, []);
 
-  // Win screen: fanfare, then one chime and buzz per star as each one pops in.
+  // Win screen sounds, in order: confetti pops (left and right, matching the
+  // two cannons), fanfare, applause sized to the stars, then a chime and buzz
+  // per star as each one pops in. With reduced motion there are no cannons,
+  // so a single soft pop plays instead.
   // Everything is scheduled with timers so cleanup cancels it cleanly.
   useEffect(() => {
     if (!showOpenedSafe) return undefined;
 
-    const timers = [setTimeout(playFanfare, 0)];
+    const gentle = prefersReducedMotion();
+    const applause = APPLAUSE_BY_STARS[winStars] ?? APPLAUSE_BY_STARS[1];
+
+    const timers = [
+      setTimeout(() => {
+        if (gentle) {
+          playClip('pop', { volume: 0.35 });
+        } else {
+          playClip('pop', { volume: 0.7, pan: -0.7 });
+        }
+      }, POP_AT_MS),
+      setTimeout(playFanfare, FANFARE_AT_MS),
+      setTimeout(() => {
+        playClip('applause', { volume: applause.volume, stopAfter: applause.length });
+      }, APPLAUSE_AT_MS),
+    ];
+
+    if (!gentle) {
+      timers.push(setTimeout(() => playClip('pop', { volume: 0.7, pan: 0.7 }), POP_AT_MS + 90));
+    }
+
     for (let index = 0; index < winStars; index += 1) {
       timers.push(setTimeout(() => {
         playStarChime(index);
@@ -682,12 +818,16 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
       }, STAR_START_MS + index * STAR_STEP_MS));
     }
 
-    return () => timers.forEach(clearTimeout);
-  }, [showOpenedSafe, winStars, playFanfare, playStarChime, buzz]);
+    return () => {
+      timers.forEach(clearTimeout);
+      stopCelebrationSounds();
+    };
+  }, [showOpenedSafe, winStars, playClip, playFanfare, playStarChime, stopCelebrationSounds, buzz]);
 
   useEffect(() => {
     return () => {
       stopProximitySound();
+      stopCelebrationSounds();
       clearTransition();
 
       if (audioContext.current) {
@@ -695,7 +835,7 @@ export default function SafeMechanism({ difficulty, onBack, onWin, bestRecord = 
         audioContext.current = null;
       }
     };
-  }, [clearTransition, stopProximitySound]);
+  }, [clearTransition, stopCelebrationSounds, stopProximitySound]);
 
   /* ---------- Screens ---------- */
 
